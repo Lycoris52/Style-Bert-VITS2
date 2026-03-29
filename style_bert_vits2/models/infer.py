@@ -18,6 +18,9 @@ from style_bert_vits2.nlp import (
 )
 from style_bert_vits2.nlp.symbols import SYMBOLS
 
+def emit_hook(hook, **kwargs):
+    if hook is not None:
+        hook(kwargs)
 
 def get_net_g(
     model_path: str, version: str, device: str, hps: HyperParameters
@@ -182,6 +185,7 @@ def infer(
     assist_text_weight: float = 0.7,
     given_phone: Optional[list[str]] = None,
     given_tone: Optional[list[int]] = None,
+    hook=None,
 ) -> NDArray[Any]:
     is_jp_extra = hps.version.endswith("JP-Extra")
     bert, ja_bert, en_bert, phones, tones, lang_ids = get_text(
@@ -209,63 +213,72 @@ def infer(
         ja_bert = ja_bert[:, :-2]
         en_bert = en_bert[:, :-2]
 
-    with torch.no_grad():
-        x_tst = phones.to(device).unsqueeze(0)
-        tones = tones.to(device).unsqueeze(0)
-        lang_ids = lang_ids.to(device).unsqueeze(0)
-        bert = bert.to(device).unsqueeze(0)
-        ja_bert = ja_bert.to(device).unsqueeze(0)
-        en_bert = en_bert.to(device).unsqueeze(0)
-        x_tst_lengths = torch.LongTensor([phones.size(0)]).to(device)
-        style_vec_tensor = torch.from_numpy(style_vec).to(device).unsqueeze(0)
-        del phones
-        sid_tensor = torch.LongTensor([sid]).to(device)
 
-        if is_jp_extra:
-            output = cast(SynthesizerTrnJPExtra, net_g).infer(
+    emit_hook(hook, phone_ids=phones.tolist())
+
+    old_hook = getattr(net_g, "_lipsync_hook", None)
+    net_g._lipsync_hook = hook
+
+    try:
+        with torch.no_grad():
+            x_tst = phones.to(device).unsqueeze(0)
+            tones = tones.to(device).unsqueeze(0)
+            lang_ids = lang_ids.to(device).unsqueeze(0)
+            bert = bert.to(device).unsqueeze(0)
+            ja_bert = ja_bert.to(device).unsqueeze(0)
+            en_bert = en_bert.to(device).unsqueeze(0)
+            x_tst_lengths = torch.LongTensor([phones.size(0)]).to(device)
+            style_vec_tensor = torch.from_numpy(style_vec).to(device).unsqueeze(0)
+            del phones
+            sid_tensor = torch.LongTensor([sid]).to(device)
+
+            if is_jp_extra:
+                output = cast(SynthesizerTrnJPExtra, net_g).infer(
+                    x_tst,
+                    x_tst_lengths,
+                    sid_tensor,
+                    tones,
+                    lang_ids,
+                    ja_bert,
+                    style_vec=style_vec_tensor,
+                    length_scale=length_scale,
+                    sdp_ratio=sdp_ratio,
+                    noise_scale=noise_scale,
+                    noise_scale_w=noise_scale_w,
+                )
+            else:
+                output = cast(SynthesizerTrn, net_g).infer(
+                    x_tst,
+                    x_tst_lengths,
+                    sid_tensor,
+                    tones,
+                    lang_ids,
+                    bert,
+                    ja_bert,
+                    en_bert,
+                    style_vec=style_vec_tensor,
+                    length_scale=length_scale,
+                    sdp_ratio=sdp_ratio,
+                    noise_scale=noise_scale,
+                    noise_scale_w=noise_scale_w,
+                )
+
+            audio = output[0][0, 0].data.cpu().float().numpy()
+
+            del (
                 x_tst,
-                x_tst_lengths,
-                sid_tensor,
-                tones,
-                lang_ids,
-                ja_bert,
-                style_vec=style_vec_tensor,
-                length_scale=length_scale,
-                sdp_ratio=sdp_ratio,
-                noise_scale=noise_scale,
-                noise_scale_w=noise_scale_w,
-            )
-        else:
-            output = cast(SynthesizerTrn, net_g).infer(
-                x_tst,
-                x_tst_lengths,
-                sid_tensor,
                 tones,
                 lang_ids,
                 bert,
+                x_tst_lengths,
+                sid_tensor,
                 ja_bert,
                 en_bert,
-                style_vec=style_vec_tensor,
-                length_scale=length_scale,
-                sdp_ratio=sdp_ratio,
-                noise_scale=noise_scale,
-                noise_scale_w=noise_scale_w,
-            )
+                style_vec,
+            )  # , emo
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+    finally:
+        net_g._lipsync_hook = old_hook
 
-        audio = output[0][0, 0].data.cpu().float().numpy()
-
-        del (
-            x_tst,
-            tones,
-            lang_ids,
-            bert,
-            x_tst_lengths,
-            sid_tensor,
-            ja_bert,
-            en_bert,
-            style_vec,
-        )  # , emo
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-        return audio
+    return audio

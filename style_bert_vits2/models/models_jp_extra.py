@@ -1,5 +1,6 @@
 import math
 from typing import Any, Optional
+import numpy as np
 
 import torch
 from torch import nn
@@ -1154,4 +1155,13 @@ class SynthesizerTrn(nn.Module):
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
         z = self.flow(z_p, y_mask, g=g, reverse=True)
         o = self.dec((z * y_mask)[:, :, :max_len], g=g)
+
+        # CPU に移動し、int の List に変換
+        dur = w_ceil.squeeze().detach().cpu().numpy().astype(np.int32)
+        dur_frames = dur.tolist() if dur.ndim == 1 else dur.reshape(-1).tolist()
+
+        hook = getattr(self, "_lipsync_hook", None)
+        if hook is not None:
+            hook({"durations": dur_frames})
+
         return o, attn, y_mask, (z, z_p, m_p, logs_p)

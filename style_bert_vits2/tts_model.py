@@ -131,6 +131,8 @@ class TTSModel:
         # onnx_session は ONNX 推論時のみ遅延初期化される
         self.onnx_session: Optional[onnxruntime.InferenceSession] = None
 
+        self.last_lipsync_info = None
+
     def load(self) -> None:
         """
         音声合成モデルをデバイスにロードする。
@@ -426,6 +428,10 @@ class TTSModel:
                 reference_audio_path, style_weight
             )
 
+        captured = {}
+        def hook(data):
+            captured.update(data)
+
         # PyTorch 推論時
         start_time = time.time()
         if not self.is_onnx_model:
@@ -466,6 +472,7 @@ class TTSModel:
                         style_vec=style_vector,
                         given_phone=given_phone,
                         given_tone=given_tone,
+                        hook=hook,
                     )
 
             # 改行ごとに分割して音声を生成
@@ -489,6 +496,7 @@ class TTSModel:
                                 assist_text=assist_text,
                                 assist_text_weight=assist_text_weight,
                                 style_vec=style_vector,
+                                hook=hook,
                             )
                         )
                         if i != len(texts) - 1:
@@ -553,6 +561,8 @@ class TTSModel:
                     if i != len(texts) - 1:
                         audios.append(np.zeros(int(44100 * split_interval)))
                 audio = np.concatenate(audios)
+
+        self.last_lipsync_info = captured if captured else None
 
         logger.info(
             f"Audio data generated successfully ({time.time() - start_time:.2f}s)"
