@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import style_bert_vits2.nlp.symbols as symbols
@@ -261,6 +262,15 @@ def create_app(server: TTSServer, root_path: str = "") -> FastAPI:
         docs_url=None,
         redoc_url=None,
         openapi_url="/openapi.json",
+    )
+
+    # ローカルでやる場合、CORS 許可は要らない
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     @app.get("/docs-lite", include_in_schema=False)
