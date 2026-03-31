@@ -9,6 +9,7 @@ import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
 import style_bert_vits2.nlp.symbols as symbols
@@ -271,6 +272,12 @@ def create_app(server: TTSServer, root_path: str = "") -> FastAPI:
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+
+    app.add_middleware(
+        GZipMiddleware,
+        minimum_size=500,
+        compresslevel=5,
     )
 
     @app.get("/docs-lite", include_in_schema=False)
